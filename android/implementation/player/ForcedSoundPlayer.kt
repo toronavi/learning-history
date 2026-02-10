@@ -29,6 +29,7 @@ class ForcedSoundPlayer(
     private val TAG = "ForcedSoundPlayer"
     private var mediaPlayer: MediaPlayer? = null
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val cryptoManager = CryptoManager()
     
     private val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -63,6 +64,25 @@ class ForcedSoundPlayer(
     fun play(file: File, volumePercent: Float = 0.7f) {
         if (!file.exists()) return
         prepareAndPlay(Uri.fromFile(file), volumePercent)
+    }
+
+    fun playEncryptedFile(file: File, volumePercent: Float = 0.7f) {
+        if (!file.exists()) return
+    
+        runCatching {
+            // 1. ファイルから暗号化データを読み込み
+            val encryptedData = file.readBytes()
+            
+            // 2. メモリ上で復号
+            val decryptedData = cryptoManager.decrypt(encryptedData)
+            
+            // 3. メモリ内のバイト配列をDataSourceとしてセット
+            val dataSource = MemoryMediaDataSource(decryptedData)
+            
+            prepareAndPlayWithDataSource(dataSource, volumePercent)
+        }.onFailure {
+            Log.e(TAG, "Decryption or Playback failed", it)
+        }
     }
 
     private fun prepareAndPlay(uri: Uri, volumePercent: Float) {
@@ -109,6 +129,30 @@ class ForcedSoundPlayer(
             Log.e(TAG, "Failed to play sound", e)
             cleanup()
         }
+    }
+
+    private fun prepareAndPlayWithDataSource(dataSource: MemoryMediaDataSource, volumePercent: Float) {
+        if (isProcessing) return
+        isProcessing = true
+        
+        runCatching {
+            // 音量・フォーカス・バイブ設定 (以前のロジックと同じ)
+            setupAudioAndVibration(volumePercent)
+
+            mediaPlayer = MediaPlayer().apply {
+                setDataSource(dataSource) // バイト配列を直接指定
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setOnPreparedListener { start() }
+                setOnCompletionListener { cleanup() }
+                setOnErrorListener { _, _, _ -> cleanup(); true }
+                prepareAsync()
+            }
+        }.onFailure { cleanup() }
     }
 
     private fun requestAudioFocus() {
