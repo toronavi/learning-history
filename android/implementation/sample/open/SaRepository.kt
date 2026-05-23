@@ -7,7 +7,7 @@ class SaRepository {
     )
     val notificationSaData = _notificationSaData.asSharedFlow()
 
-    suspend fun emitSaData(data: SaData) {
-        _notificationSaData.emit(SaData)
+    fun tryEmitSaData(data: SaData) {
+        _notificationSaData.tryEmit(SaData)
     }
 }
